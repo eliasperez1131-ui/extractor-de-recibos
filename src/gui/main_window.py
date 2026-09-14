@@ -27,7 +27,8 @@ from .widgets import (
 
 
 APP_TITLE = "Extractor de Recibos a Excel"
-APP_NAME = "Extractor de Recibos a Excel v1.0"
+APP_NAME = "Extractor de Recibos a Excel v1.0.3"
+APP_VERSION = "v1.0.3"
 DEFAULT_OUTPUT = "recibos_extraidos.xlsx"
 
 
@@ -112,7 +113,7 @@ class MainWindow(ctk.CTk):
         title_lbl.pack(side="left", padx=(4, 20), pady=14)
 
         subtitle_lbl = make_label(
-            header, "v1.0",
+            header, APP_VERSION,
             size=11, color="#C9D6E5",
         )
         subtitle_lbl.pack(side="left", padx=(0, 8), pady=14)
@@ -172,23 +173,23 @@ class MainWindow(ctk.CTk):
         )
 
         btns = ctk.CTkFrame(card, fg_color="transparent")
-        btns.pack(fill="x", padx=16, pady=(0, 12))
+        btns.pack(fill="x", padx=12, pady=(0, 12))
 
         make_primary_button(
-            btns, "📂 Carpeta", command=self._on_add_folder,
-        ).pack(side="left", padx=(0, 6), pady=4)
+            btns, "📂 Carpeta", command=self._on_add_folder, width=110,
+        ).pack(side="left", padx=3, pady=4)
 
         make_primary_button(
-            btns, "🗜️ ZIP(s)", command=self._on_add_zip,
-        ).pack(side="left", padx=6, pady=4)
+            btns, "🗜️ ZIPs", command=self._on_add_zip, width=80,
+        ).pack(side="left", padx=3, pady=4)
 
         make_primary_button(
-            btns, "📄 Archivo(s)", command=self._on_add_files,
-        ).pack(side="left", padx=6, pady=4)
+            btns, "📄 Archivos", command=self._on_add_files, width=100,
+        ).pack(side="left", padx=3, pady=4)
 
         make_secondary_button(
-            btns, "🗑️ Limpiar", command=self._on_clear_files,
-        ).pack(side="right", padx=(6, 0), pady=4)
+            btns, "🗑️ Limpiar", command=self._on_clear_files, width=90,
+        ).pack(side="left", padx=3, pady=4)
 
     def _build_config_card(self, parent) -> None:
         card = Card(parent)
@@ -200,36 +201,36 @@ class MainWindow(ctk.CTk):
         )
 
         row1 = ctk.CTkFrame(card, fg_color="transparent")
-        row1.pack(fill="x", padx=16, pady=(0, 8))
+        row1.pack(fill="x", padx=12, pady=(0, 6))
 
-        make_label(row1, "Idioma OCR:", size=12).pack(side="left", padx=(0, 8))
+        make_label(row1, "OCR:", size=11).pack(side="left", padx=(4, 4))
         self.ocr_var = ctk.StringVar(value=self.settings.get("ocr_lang", "spa+eng+por"))
         ocr_menu = ctk.CTkOptionMenu(
             row1, variable=self.ocr_var,
             values=["spa", "spa+eng", "spa+eng+por", "eng", "por"],
-            width=150,
+            width=130,
         )
-        ocr_menu.pack(side="left", padx=(0, 16))
+        ocr_menu.pack(side="left", padx=2)
 
-        make_label(row1, "Workers:", size=12).pack(side="left", padx=(0, 8))
+        make_label(row1, "Workers:", size=11).pack(side="left", padx=(8, 4))
         cpu = os.cpu_count() or 4
         self.workers_var = ctk.StringVar(value=str(self.settings.get("max_workers") or (cpu - 1)))
         ctk.CTkOptionMenu(
             row1, variable=self.workers_var,
             values=["1", "2", str(cpu - 1), str(cpu), str(cpu * 2)],
-            width=80,
-        ).pack(side="left")
+            width=70,
+        ).pack(side="left", padx=2)
 
         row2 = ctk.CTkFrame(card, fg_color="transparent")
-        row2.pack(fill="x", padx=16, pady=(0, 12))
+        row2.pack(fill="x", padx=12, pady=(0, 12))
 
-        make_label(row2, "Salida Excel:", size=12).pack(side="left", padx=(0, 8))
+        make_label(row2, "Excel:", size=11).pack(side="left", padx=(4, 4))
         self.output_var = ctk.StringVar(value=str(Path.cwd() / DEFAULT_OUTPUT))
         out_entry = ctk.CTkEntry(row2, textvariable=self.output_var)
-        out_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        out_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
         make_primary_button(
-            row2, "...", command=self._on_choose_output, width=40,
+            row2, "...", command=self._on_choose_output, width=36,
         ).pack(side="left")
 
     def _build_actions_card(self, parent) -> None:
@@ -242,30 +243,30 @@ class MainWindow(ctk.CTk):
         )
 
         row1 = ctk.CTkFrame(card, fg_color="transparent")
-        row1.pack(fill="x", padx=16, pady=(0, 6))
+        row1.pack(fill="x", padx=12, pady=(0, 6))
 
         self.process_btn = make_success_button(
-            row1, "▶️ Procesar", command=self._on_process,
+            row1, "▶️ Procesar", command=self._on_process, width=130,
         )
-        self.process_btn.pack(side="left", padx=(0, 8), pady=4)
+        self.process_btn.pack(side="left", padx=3, pady=4)
 
         self.cancel_btn = make_danger_button(
-            row1, "⏹️ Cancelar", command=lambda: None,
+            row1, "⏹️ Cancelar", command=lambda: None, width=110,
         )
-        self.cancel_btn.pack(side="left", padx=(0, 8), pady=4)
+        self.cancel_btn.pack(side="left", padx=3, pady=4)
 
         row2 = ctk.CTkFrame(card, fg_color="transparent")
-        row2.pack(fill="x", padx=16, pady=(0, 12))
+        row2.pack(fill="x", padx=12, pady=(0, 12))
 
         self.preview_btn = make_primary_button(
-            row2, "👁️ Vista previa", command=lambda: None,
+            row2, "👁️ Vista previa", command=lambda: None, width=130,
         )
-        self.preview_btn.pack(side="left", padx=(0, 8), pady=4)
+        self.preview_btn.pack(side="left", padx=3, pady=4)
 
         self.open_excel_btn = make_primary_button(
-            row2, "📊 Abrir Excel", command=lambda: None,
+            row2, "📊 Abrir Excel", command=lambda: None, width=130,
         )
-        self.open_excel_btn.pack(side="left", padx=(0, 8), pady=4)
+        self.open_excel_btn.pack(side="left", padx=3, pady=4)
 
     def _build_files_card(self, parent) -> None:
         card = Card(parent)

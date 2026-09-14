@@ -22,12 +22,12 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'Extractor de Recibos'),
             StringStruct(u'FileDescription', u'Extractor inteligente de recibos y facturas a Excel'),
-            StringStruct(u'FileVersion', u'1.0.0.0'),
+            StringStruct(u'FileVersion', u'1.0.3.0'),
             StringStruct(u'InternalName', u'ExtractorRecibos'),
             StringStruct(u'LegalCopyright', u'\u00A9 2026 Extractor de Recibos'),
             StringStruct(u'OriginalFilename', u'ExtractorRecibos.exe'),
             StringStruct(u'ProductName', u'Extractor de Recibos a Excel'),
-            StringStruct(u'ProductVersion', u'1.0.0.0'),
+            StringStruct(u'ProductVersion', u'1.0.3.0'),
           ]
         )
       ]
