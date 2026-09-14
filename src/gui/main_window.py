@@ -62,8 +62,8 @@ class MainWindow(ctk.CTk):
         ctk.set_default_color_theme("blue")
 
         self.title(APP_NAME)
-        self.geometry("1100x720")
-        self.minsize(960, 600)
+        self.geometry("1300x820")
+        self.minsize(1100, 700)
         self.configure(fg_color=COLORS["bg_light"])
         self._cards: List = []
 
@@ -118,11 +118,10 @@ class MainWindow(ctk.CTk):
         subtitle_lbl.pack(side="left", padx=(0, 8), pady=14)
 
         self.theme_btn = ctk.CTkButton(
-            header, text="☀️ Claro", width=110, height=36,
+            header, text="Claro", width=110, height=36,
             fg_color="#FFFFFF",
             hover_color="#F0F4F8",
             text_color=COLORS["primary"],
-            text_color_disabled="#FFFFFF",
             border_width=1,
             border_color="#FFFFFF",
             corner_radius=8,
@@ -130,23 +129,16 @@ class MainWindow(ctk.CTk):
             command=self._toggle_theme,
         )
         self.theme_btn.pack(side="right", padx=20, pady=14)
-        self._update_theme_button()
 
-        self.locale_lbl = make_label(
-            header, "Locale: detectando...",
-            size=12, color="#E0E8F0",
-        )
-        self.locale_lbl.pack(side="right", padx=8, pady=14)
-
-        body = ctk.CTkFrame(self, fg_color=COLORS["bg"])
+        body = ctk.CTkFrame(self, fg_color=COLORS["bg_light"])
         body.pack(fill="both", expand=True, padx=12, pady=12)
 
-        body.grid_columnconfigure(0, weight=1, uniform="col1")
-        body.grid_columnconfigure(1, weight=2, uniform="col1")
+        body.grid_columnconfigure(0, weight=2, uniform="col1")
+        body.grid_columnconfigure(1, weight=3, uniform="col1")
         body.grid_rowconfigure(0, weight=1)
 
         # Left column: input + config
-        left = ctk.CTkFrame(body, fg_color=COLORS["bg"])
+        left = ctk.CTkFrame(body, fg_color=COLORS["bg_light"])
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
         self._build_input_card(left)
@@ -154,12 +146,21 @@ class MainWindow(ctk.CTk):
         self._build_actions_card(left)
 
         # Right column: log + progress
-        right = ctk.CTkFrame(body, fg_color=COLORS["bg"])
+        right = ctk.CTkFrame(body, fg_color=COLORS["bg_light"])
         right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
         self._build_files_card(right)
         self._build_progress_card(right)
         self._build_log_card(right)
+
+        self._apply_theme_to_widgets()
+        self._update_theme_button()
+
+        self.locale_lbl = make_label(
+            header, "Locale: detectando...",
+            size=12, color="#E0E8F0",
+        )
+        self.locale_lbl.pack(side="right", padx=8, pady=14)
 
     def _build_input_card(self, parent) -> None:
         card = Card(parent)
@@ -171,23 +172,23 @@ class MainWindow(ctk.CTk):
         )
 
         btns = ctk.CTkFrame(card, fg_color="transparent")
-        btns.pack(fill="x", padx=16, pady=(0, 8))
+        btns.pack(fill="x", padx=16, pady=(0, 12))
 
         make_primary_button(
-            btns, "📂 Carpeta", command=self._on_add_folder, width=110,
-        ).pack(side="left", padx=(0, 6))
+            btns, "📂 Carpeta", command=self._on_add_folder,
+        ).pack(side="left", padx=(0, 6), pady=4)
 
         make_primary_button(
-            btns, "🗜️ ZIP(s)", command=self._on_add_zip, width=110,
-        ).pack(side="left", padx=6)
+            btns, "🗜️ ZIP(s)", command=self._on_add_zip,
+        ).pack(side="left", padx=6, pady=4)
 
         make_primary_button(
-            btns, "📄 Archivo(s)", command=self._on_add_files, width=110,
-        ).pack(side="left", padx=6)
+            btns, "📄 Archivo(s)", command=self._on_add_files,
+        ).pack(side="left", padx=6, pady=4)
 
         make_secondary_button(
-            btns, "🗑️ Limpiar", command=self._on_clear_files, width=90,
-        ).pack(side="right")
+            btns, "🗑️ Limpiar", command=self._on_clear_files,
+        ).pack(side="right", padx=(6, 0), pady=4)
 
     def _build_config_card(self, parent) -> None:
         card = Card(parent)
@@ -206,7 +207,7 @@ class MainWindow(ctk.CTk):
         ocr_menu = ctk.CTkOptionMenu(
             row1, variable=self.ocr_var,
             values=["spa", "spa+eng", "spa+eng+por", "eng", "por"],
-            width=180,
+            width=150,
         )
         ocr_menu.pack(side="left", padx=(0, 16))
 
@@ -224,8 +225,8 @@ class MainWindow(ctk.CTk):
 
         make_label(row2, "Salida Excel:", size=12).pack(side="left", padx=(0, 8))
         self.output_var = ctk.StringVar(value=str(Path.cwd() / DEFAULT_OUTPUT))
-        out_entry = ctk.CTkEntry(row2, textvariable=self.output_var, width=320)
-        out_entry.pack(side="left", padx=(0, 6))
+        out_entry = ctk.CTkEntry(row2, textvariable=self.output_var)
+        out_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         make_primary_button(
             row2, "...", command=self._on_choose_output, width=40,
@@ -236,31 +237,35 @@ class MainWindow(ctk.CTk):
         card.pack(fill="x", pady=(0, 8))
         self._cards.append(card)
 
-        ctk_frame = ctk.CTkFrame(card, fg_color="transparent")
-        ctk_frame.pack(fill="x", padx=16, pady=12)
+        make_label(card, "3. Acciones", size=14, weight="bold").pack(
+            anchor="w", padx=16, pady=(12, 8),
+        )
+
+        row1 = ctk.CTkFrame(card, fg_color="transparent")
+        row1.pack(fill="x", padx=16, pady=(0, 6))
 
         self.process_btn = make_success_button(
-            ctk_frame, "▶️ Procesar", command=self._on_process, width=160,
+            row1, "▶️ Procesar", command=self._on_process,
         )
-        self.process_btn.pack(side="left", padx=(0, 8))
+        self.process_btn.pack(side="left", padx=(0, 8), pady=4)
 
         self.cancel_btn = make_danger_button(
-            ctk_frame, "⏹️ Cancelar", command=lambda: None,
-            width=120,
+            row1, "⏹️ Cancelar", command=lambda: None,
         )
-        self.cancel_btn.pack(side="left", padx=(0, 8))
+        self.cancel_btn.pack(side="left", padx=(0, 8), pady=4)
+
+        row2 = ctk.CTkFrame(card, fg_color="transparent")
+        row2.pack(fill="x", padx=16, pady=(0, 12))
 
         self.preview_btn = make_primary_button(
-            ctk_frame, "👁️ Vista previa", command=lambda: None,
-            width=140,
+            row2, "👁️ Vista previa", command=lambda: None,
         )
-        self.preview_btn.pack(side="left", padx=(0, 8))
+        self.preview_btn.pack(side="left", padx=(0, 8), pady=4)
 
         self.open_excel_btn = make_primary_button(
-            ctk_frame, "📊 Abrir Excel", command=lambda: None,
-            width=140,
+            row2, "📊 Abrir Excel", command=lambda: None,
         )
-        self.open_excel_btn.pack(side="right")
+        self.open_excel_btn.pack(side="left", padx=(0, 8), pady=4)
 
     def _build_files_card(self, parent) -> None:
         card = Card(parent)
@@ -270,7 +275,7 @@ class MainWindow(ctk.CTk):
         top = ctk.CTkFrame(card, fg_color="transparent")
         top.pack(fill="x", padx=16, pady=(12, 4))
 
-        make_label(top, "3. Archivos detectados", size=14, weight="bold").pack(side="left")
+        make_label(top, "4. Archivos detectados", size=14, weight="bold").pack(side="left")
 
         self.files_count_lbl = make_label(top, "0 archivos", size=12, color=COLORS["text_muted"])
         self.files_count_lbl.pack(side="right")
@@ -290,7 +295,7 @@ class MainWindow(ctk.CTk):
         top = ctk.CTkFrame(inner, fg_color="transparent")
         top.pack(fill="x", pady=(0, 6))
 
-        make_label(top, "4. Progreso", size=14, weight="bold").pack(side="left")
+        make_label(top, "5. Progreso", size=14, weight="bold").pack(side="left")
 
         self.progress_text_lbl = make_label(top, "0/0", size=12, color=COLORS["text_muted"])
         self.progress_text_lbl.pack(side="right")
@@ -310,7 +315,7 @@ class MainWindow(ctk.CTk):
         top = ctk.CTkFrame(card, fg_color="transparent")
         top.pack(fill="x", padx=16, pady=(12, 4))
 
-        make_label(top, "5. Registro de actividad", size=14, weight="bold").pack(side="left")
+        make_label(top, "6. Registro de actividad", size=14, weight="bold").pack(side="left")
 
         make_primary_button(
             top, "💾 Guardar log", command=self._on_save_log,
