@@ -21,7 +21,8 @@ from ..core.locale_detector import LocaleInfo
 from ..workers import Processor
 from .widgets import (
     COLORS, Card, ScrollableLog, make_label,
-    make_primary_button, make_success_button, make_danger_button,
+    make_primary_button, make_success_button, make_danger_button, make_secondary_button,
+    set_button_active,
 )
 
 
@@ -63,7 +64,8 @@ class MainWindow(ctk.CTk):
         self.title(APP_NAME)
         self.geometry("1100x720")
         self.minsize(960, 600)
-        self.configure(fg_color=COLORS["bg"])
+        self.configure(fg_color=COLORS["bg_light"])
+        self._cards: List = []
 
         logo_path = _find_logo_path()
         if logo_path:
@@ -116,12 +118,19 @@ class MainWindow(ctk.CTk):
         subtitle_lbl.pack(side="left", padx=(0, 8), pady=14)
 
         self.theme_btn = ctk.CTkButton(
-            header, text="🌓 Tema", width=90, height=32,
-            fg_color="#FFFFFF", text_color=COLORS["primary"],
-            hover_color="#E8EEF3", corner_radius=8,
+            header, text="☀️ Claro", width=110, height=36,
+            fg_color="#FFFFFF",
+            hover_color="#F0F4F8",
+            text_color=COLORS["primary"],
+            text_color_disabled="#FFFFFF",
+            border_width=1,
+            border_color="#FFFFFF",
+            corner_radius=8,
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._toggle_theme,
         )
         self.theme_btn.pack(side="right", padx=20, pady=14)
+        self._update_theme_button()
 
         self.locale_lbl = make_label(
             header, "Locale: detectando...",
@@ -155,6 +164,7 @@ class MainWindow(ctk.CTk):
     def _build_input_card(self, parent) -> None:
         card = Card(parent)
         card.pack(fill="x", pady=(0, 8))
+        self._cards.append(card)
 
         make_label(card, "1. Archivos de entrada", size=14, weight="bold").pack(
             anchor="w", padx=16, pady=(12, 8),
@@ -175,13 +185,14 @@ class MainWindow(ctk.CTk):
             btns, "📄 Archivo(s)", command=self._on_add_files, width=110,
         ).pack(side="left", padx=6)
 
-        make_danger_button(
+        make_secondary_button(
             btns, "🗑️ Limpiar", command=self._on_clear_files, width=90,
         ).pack(side="right")
 
     def _build_config_card(self, parent) -> None:
         card = Card(parent)
         card.pack(fill="x", pady=(0, 8))
+        self._cards.append(card)
 
         make_label(card, "2. Configuración", size=14, weight="bold").pack(
             anchor="w", padx=16, pady=(12, 8),
@@ -223,6 +234,7 @@ class MainWindow(ctk.CTk):
     def _build_actions_card(self, parent) -> None:
         card = Card(parent)
         card.pack(fill="x", pady=(0, 8))
+        self._cards.append(card)
 
         ctk_frame = ctk.CTkFrame(card, fg_color="transparent")
         ctk_frame.pack(fill="x", padx=16, pady=12)
@@ -233,26 +245,27 @@ class MainWindow(ctk.CTk):
         self.process_btn.pack(side="left", padx=(0, 8))
 
         self.cancel_btn = make_danger_button(
-            ctk_frame, "⏹️ Cancelar", command=self._on_cancel,
-            width=120, state="disabled",
+            ctk_frame, "⏹️ Cancelar", command=lambda: None,
+            width=120,
         )
         self.cancel_btn.pack(side="left", padx=(0, 8))
 
         self.preview_btn = make_primary_button(
-            ctk_frame, "👁️ Vista previa", command=self._on_preview,
-            width=140, state="disabled",
+            ctk_frame, "👁️ Vista previa", command=lambda: None,
+            width=140,
         )
         self.preview_btn.pack(side="left", padx=(0, 8))
 
         self.open_excel_btn = make_primary_button(
-            ctk_frame, "📊 Abrir Excel", command=self._on_open_excel,
-            width=140, state="disabled",
+            ctk_frame, "📊 Abrir Excel", command=lambda: None,
+            width=140,
         )
         self.open_excel_btn.pack(side="right")
 
     def _build_files_card(self, parent) -> None:
         card = Card(parent)
         card.pack(fill="both", expand=False, pady=(0, 8), ipady=4)
+        self._cards.append(card)
 
         top = ctk.CTkFrame(card, fg_color="transparent")
         top.pack(fill="x", padx=16, pady=(12, 4))
@@ -269,6 +282,7 @@ class MainWindow(ctk.CTk):
     def _build_progress_card(self, parent) -> None:
         card = Card(parent)
         card.pack(fill="x", pady=(0, 8))
+        self._cards.append(card)
 
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="x", padx=16, pady=12)
@@ -291,16 +305,16 @@ class MainWindow(ctk.CTk):
     def _build_log_card(self, parent) -> None:
         card = Card(parent)
         card.pack(fill="both", expand=True, pady=(0, 0))
+        self._cards.append(card)
 
         top = ctk.CTkFrame(card, fg_color="transparent")
         top.pack(fill="x", padx=16, pady=(12, 4))
 
         make_label(top, "5. Registro de actividad", size=14, weight="bold").pack(side="left")
 
-        ctk.CTkButton(
-            top, text="💾 Guardar log", width=110, height=28,
-            fg_color=COLORS["accent"], hover_color="#1565C0",
-            text_color="#FFFFFF", corner_radius=6, command=self._on_save_log,
+        make_primary_button(
+            top, "💾 Guardar log", command=self._on_save_log,
+            width=130, height=32,
         ).pack(side="right")
 
         self.log_text = ScrollableLog(card)
@@ -388,6 +402,41 @@ class MainWindow(ctk.CTk):
         ctk.set_appearance_mode(new_mode)
         self.settings["theme"] = new_mode
         mappings_module.save_settings(self.settings)
+        self._update_theme_button()
+        self._apply_theme_to_widgets()
+
+    def _update_theme_button(self) -> None:
+        if not getattr(self, "theme_btn", None):
+            return
+        mode = ctk.get_appearance_mode().lower()
+        if mode == "dark":
+            self.theme_btn.configure(text="☀️ Claro")
+            self.theme_btn.configure(fg_color="#FFFFFF")
+            self.theme_btn.configure(text_color=COLORS["primary"])
+            self.theme_btn.configure(border_color="#FFFFFF")
+        else:
+            self.theme_btn.configure(text="🌙 Oscuro")
+            self.theme_btn.configure(fg_color="#FFFFFF")
+            self.theme_btn.configure(text_color=COLORS["primary"])
+            self.theme_btn.configure(border_color="#FFFFFF")
+
+    def _apply_theme_to_widgets(self) -> None:
+        mode = ctk.get_appearance_mode().lower()
+        is_dark = mode == "dark"
+        bg = COLORS["bg_dark"] if is_dark else COLORS["bg_light"]
+        card_bg = COLORS["card_dark"] if is_dark else COLORS["card_light"]
+        border = COLORS["border_dark"] if is_dark else COLORS["border_light"]
+        text = COLORS["text_dark"] if is_dark else COLORS["text_light"]
+        text_muted = COLORS["text_muted_dark"] if is_dark else COLORS["text_muted_light"]
+        try:
+            self.configure(fg_color=bg)
+        except Exception:
+            pass
+        for card in getattr(self, "_cards", []):
+            try:
+                card.configure(fg_color=card_bg, border_color=border)
+            except Exception:
+                pass
 
     def _on_process(self) -> None:
         if self._processing:
@@ -466,10 +515,10 @@ class MainWindow(ctk.CTk):
             self._last_output_path = saved
             self._append_log(f"✓ Excel generado: {saved}")
             self._append_log(f"✓ {len(result['rows'])} filas x {len(result['columns'])} columnas")
-            self.open_excel_btn.configure(state="normal")
-            self.preview_btn.configure(state="normal")
-            self.process_btn.configure(state="normal")
-            self.cancel_btn.configure(state="disabled")
+            set_button_active(self.open_excel_btn, self._on_open_excel)
+            set_button_active(self.preview_btn, self._on_preview)
+            set_button_active(self.process_btn, self._on_process)
+            set_button_active(self.cancel_btn, None)
             self.progress.set(1.0)
             self.progress_text_lbl.configure(
                 text=f"✓ {result['summary']['processed']} archivos procesados"
@@ -501,21 +550,21 @@ class MainWindow(ctk.CTk):
         if self._processor:
             self._processor.cancel()
             self._append_log("⚠ Cancelación solicitada...")
-            self.cancel_btn.configure(state="disabled")
+            set_button_active(self.cancel_btn, None)
 
     def _set_processing_state(self, busy: bool) -> None:
         self._processing = busy
         if busy:
-            self.process_btn.configure(state="disabled")
-            self.cancel_btn.configure(state="normal")
+            set_button_active(self.process_btn, None)
+            set_button_active(self.cancel_btn, self._on_cancel)
             self.progress.set(0)
             self.progress_text_lbl.configure(text="0/0 (0%)")
             self.eta_lbl.configure(text="Iniciando...")
-            self.preview_btn.configure(state="disabled")
-            self.open_excel_btn.configure(state="disabled")
+            set_button_active(self.preview_btn, None)
+            set_button_active(self.open_excel_btn, None)
         else:
-            self.process_btn.configure(state="normal")
-            self.cancel_btn.configure(state="disabled")
+            set_button_active(self.process_btn, self._on_process)
+            set_button_active(self.cancel_btn, None)
 
     # ── Log / preview helpers ──────────────────────────────────────────────
 
