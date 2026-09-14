@@ -4,6 +4,18 @@ Aplicación de escritorio que extrae automáticamente información de **facturas
 
 > Detecta automáticamente país/moneda (México, Argentina, Brasil, Chile, Colombia, Perú, Paraguay, Uruguay, USA, España). Español como idioma principal, con soporte multi-idioma para OCR.
 
+## ⚠️ Windows SmartScreen
+
+Al ejecutar el `.exe` por primera vez, Windows puede mostrar una advertencia azul diciendo que el archivo es "poco confiable" o "potencialmente dañino".
+
+**Esto NO es un virus** — es la advertencia genérica para cualquier `.exe` que no esté firmado con un certificado de pago (~$300 USD/año). El código es open source y auditable en este repositorio.
+
+**Cómo desbloquear:**
+1. Click derecho en `ExtractorRecibos.exe` → **Propiedades** → tildá **"Desbloquear"** → Aceptar
+2. O cuando aparece la pantalla azul: **"Más información"** → **"Ejecutar de todas formas"**
+
+Más detalles en [ANTIVIRUS_NOTICE.md](./ANTIVIRUS_NOTICE.md).
+
 ---
 
 ## ✨ Características
