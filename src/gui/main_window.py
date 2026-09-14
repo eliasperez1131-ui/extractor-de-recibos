@@ -1,0 +1,613 @@
+from __future__ import annotations
+
+import os
+import platform
+import subprocess
+import sys
+import threading
+import time
+from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, messagebox
+from typing import List, Optional
+
+import customtkinter as ctk
+from PIL import Image
+
+from ..core.input_loader import InputItem, scan_path
+from ..core.excel_writer import write_excel
+from ..core import mappings as mappings_module
+from ..core.locale_detector import LocaleInfo
+from ..workers import Processor
+from .widgets import (
+    COLORS, Card, ScrollableLog, make_label,
+    make_primary_button, make_success_button, make_danger_button,
+)
+
+
+APP_TITLE = "Extractor de Recibos a Excel"
+APP_NAME = "Extractor de Recibos a Excel v1.0"
+DEFAULT_OUTPUT = "recibos_extraidos.xlsx"
+
+
+def _find_logo_path() -> Optional[Path]:
+    """Locate the logo PNG (works both in dev and inside a PyInstaller bundle)."""
+    candidates: List[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "assets" / "icon.png")
+    candidates.append(Path(__file__).resolve().parent.parent.parent / "assets" / "icon.png")
+    candidates.append(Path.cwd() / "assets" / "icon.png")
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def _tk_icon_photo(logo_path: Path):
+    """Build a tk.PhotoImage from the PNG for the window icon."""
+    try:
+        import tkinter as tk
+        return tk.PhotoImage(file=str(logo_path))
+    except Exception:
+        return None
+
+
+class MainWindow(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+
+        ctk.set_appearance_mode("system")
+        ctk.set_default_color_theme("blue")
+
+        self.title(APP_NAME)
+        self.geometry("1100x720")
+        self.minsize(960, 600)
+        self.configure(fg_color=COLORS["bg"])
+
+        logo_path = _find_logo_path()
+        if logo_path:
+            try:
+                self._logo_image = ctk.CTkImage(
+                    light_image=Image.open(logo_path),
+                    dark_image=Image.open(logo_path),
+                    size=(40, 40),
+                )
+                self.iconphoto(False, _tk_icon_photo(logo_path))
+            except Exception:
+                self._logo_image = None
+        else:
+            self._logo_image = None
+
+        self.settings = mappings_module.load_settings()
+        self._processor: Optional[Processor] = None
+        self._processing_thread: Optional[threading.Thread] = None
+        self._processing = False
+        self._last_columns: List[str] = []
+        self._last_rows: List[dict] = []
+        self._last_locale: Optional[LocaleInfo] = None
+        self._last_summary: dict = {}
+        self._last_output_path: Optional[Path] = None
+
+        self._build_ui()
+        self._refresh_files_list()
+
+    # ── UI ────────────────────────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        header = ctk.CTkFrame(self, fg_color=COLORS["primary"], height=72)
+        header.pack(fill="x", side="top")
+        header.pack_propagate(False)
+
+        if getattr(self, "_logo_image", None):
+            logo_lbl = ctk.CTkLabel(header, image=self._logo_image, text="")
+            logo_lbl.pack(side="left", padx=(16, 8), pady=14)
+
+        title_lbl = make_label(
+            header, APP_TITLE,
+            size=20, weight="bold", color="#FFFFFF",
+        )
+        title_lbl.pack(side="left", padx=(4, 20), pady=14)
+
+        subtitle_lbl = make_label(
+            header, "v1.0",
+            size=11, color="#C9D6E5",
+        )
+        subtitle_lbl.pack(side="left", padx=(0, 8), pady=14)
+
+        self.theme_btn = ctk.CTkButton(
+            header, text="🌓 Tema", width=90, height=32,
+            fg_color="#FFFFFF", text_color=COLORS["primary"],
+            hover_color="#E8EEF3", corner_radius=8,
+            command=self._toggle_theme,
+        )
+        self.theme_btn.pack(side="right", padx=20, pady=14)
+
+        self.locale_lbl = make_label(
+            header, "Locale: detectando...",
+            size=12, color="#E0E8F0",
+        )
+        self.locale_lbl.pack(side="right", padx=8, pady=14)
+
+        body = ctk.CTkFrame(self, fg_color=COLORS["bg"])
+        body.pack(fill="both", expand=True, padx=12, pady=12)
+
+        body.grid_columnconfigure(0, weight=1, uniform="col1")
+        body.grid_columnconfigure(1, weight=2, uniform="col1")
+        body.grid_rowconfigure(0, weight=1)
+
+        # Left column: input + config
+        left = ctk.CTkFrame(body, fg_color=COLORS["bg"])
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+
+        self._build_input_card(left)
+        self._build_config_card(left)
+        self._build_actions_card(left)
+
+        # Right column: log + progress
+        right = ctk.CTkFrame(body, fg_color=COLORS["bg"])
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        self._build_files_card(right)
+        self._build_progress_card(right)
+        self._build_log_card(right)
+
+    def _build_input_card(self, parent) -> None:
+        card = Card(parent)
+        card.pack(fill="x", pady=(0, 8))
+
+        make_label(card, "1. Archivos de entrada", size=14, weight="bold").pack(
+            anchor="w", padx=16, pady=(12, 8),
+        )
+
+        btns = ctk.CTkFrame(card, fg_color="transparent")
+        btns.pack(fill="x", padx=16, pady=(0, 8))
+
+        make_primary_button(
+            btns, "📂 Carpeta", command=self._on_add_folder, width=110,
+        ).pack(side="left", padx=(0, 6))
+
+        make_primary_button(
+            btns, "🗜️ ZIP(s)", command=self._on_add_zip, width=110,
+        ).pack(side="left", padx=6)
+
+        make_primary_button(
+            btns, "📄 Archivo(s)", command=self._on_add_files, width=110,
+        ).pack(side="left", padx=6)
+
+        make_danger_button(
+            btns, "🗑️ Limpiar", command=self._on_clear_files, width=90,
+        ).pack(side="right")
+
+    def _build_config_card(self, parent) -> None:
+        card = Card(parent)
+        card.pack(fill="x", pady=(0, 8))
+
+        make_label(card, "2. Configuración", size=14, weight="bold").pack(
+            anchor="w", padx=16, pady=(12, 8),
+        )
+
+        row1 = ctk.CTkFrame(card, fg_color="transparent")
+        row1.pack(fill="x", padx=16, pady=(0, 8))
+
+        make_label(row1, "Idioma OCR:", size=12).pack(side="left", padx=(0, 8))
+        self.ocr_var = ctk.StringVar(value=self.settings.get("ocr_lang", "spa+eng+por"))
+        ocr_menu = ctk.CTkOptionMenu(
+            row1, variable=self.ocr_var,
+            values=["spa", "spa+eng", "spa+eng+por", "eng", "por"],
+            width=180,
+        )
+        ocr_menu.pack(side="left", padx=(0, 16))
+
+        make_label(row1, "Workers:", size=12).pack(side="left", padx=(0, 8))
+        cpu = os.cpu_count() or 4
+        self.workers_var = ctk.StringVar(value=str(self.settings.get("max_workers") or (cpu - 1)))
+        ctk.CTkOptionMenu(
+            row1, variable=self.workers_var,
+            values=["1", "2", str(cpu - 1), str(cpu), str(cpu * 2)],
+            width=80,
+        ).pack(side="left")
+
+        row2 = ctk.CTkFrame(card, fg_color="transparent")
+        row2.pack(fill="x", padx=16, pady=(0, 12))
+
+        make_label(row2, "Salida Excel:", size=12).pack(side="left", padx=(0, 8))
+        self.output_var = ctk.StringVar(value=str(Path.cwd() / DEFAULT_OUTPUT))
+        out_entry = ctk.CTkEntry(row2, textvariable=self.output_var, width=320)
+        out_entry.pack(side="left", padx=(0, 6))
+
+        make_primary_button(
+            row2, "...", command=self._on_choose_output, width=40,
+        ).pack(side="left")
+
+    def _build_actions_card(self, parent) -> None:
+        card = Card(parent)
+        card.pack(fill="x", pady=(0, 8))
+
+        ctk_frame = ctk.CTkFrame(card, fg_color="transparent")
+        ctk_frame.pack(fill="x", padx=16, pady=12)
+
+        self.process_btn = make_success_button(
+            ctk_frame, "▶️ Procesar", command=self._on_process, width=160,
+        )
+        self.process_btn.pack(side="left", padx=(0, 8))
+
+        self.cancel_btn = make_danger_button(
+            ctk_frame, "⏹️ Cancelar", command=self._on_cancel,
+            width=120, state="disabled",
+        )
+        self.cancel_btn.pack(side="left", padx=(0, 8))
+
+        self.preview_btn = make_primary_button(
+            ctk_frame, "👁️ Vista previa", command=self._on_preview,
+            width=140, state="disabled",
+        )
+        self.preview_btn.pack(side="left", padx=(0, 8))
+
+        self.open_excel_btn = make_primary_button(
+            ctk_frame, "📊 Abrir Excel", command=self._on_open_excel,
+            width=140, state="disabled",
+        )
+        self.open_excel_btn.pack(side="right")
+
+    def _build_files_card(self, parent) -> None:
+        card = Card(parent)
+        card.pack(fill="both", expand=False, pady=(0, 8), ipady=4)
+
+        top = ctk.CTkFrame(card, fg_color="transparent")
+        top.pack(fill="x", padx=16, pady=(12, 4))
+
+        make_label(top, "3. Archivos detectados", size=14, weight="bold").pack(side="left")
+
+        self.files_count_lbl = make_label(top, "0 archivos", size=12, color=COLORS["text_muted"])
+        self.files_count_lbl.pack(side="right")
+
+        self.files_listbox = ctk.CTkTextbox(card, height=120, font=ctk.CTkFont(family="Consolas", size=11))
+        self.files_listbox.pack(fill="both", expand=False, padx=16, pady=(0, 12))
+        self.files_listbox.configure(state="disabled")
+
+    def _build_progress_card(self, parent) -> None:
+        card = Card(parent)
+        card.pack(fill="x", pady=(0, 8))
+
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=12)
+
+        top = ctk.CTkFrame(inner, fg_color="transparent")
+        top.pack(fill="x", pady=(0, 6))
+
+        make_label(top, "4. Progreso", size=14, weight="bold").pack(side="left")
+
+        self.progress_text_lbl = make_label(top, "0/0", size=12, color=COLORS["text_muted"])
+        self.progress_text_lbl.pack(side="right")
+
+        self.progress = ctk.CTkProgressBar(inner, height=14, corner_radius=7)
+        self.progress.set(0)
+        self.progress.pack(fill="x", pady=(0, 4))
+
+        self.eta_lbl = make_label(inner, "", size=11, color=COLORS["text_muted"])
+        self.eta_lbl.pack(anchor="w")
+
+    def _build_log_card(self, parent) -> None:
+        card = Card(parent)
+        card.pack(fill="both", expand=True, pady=(0, 0))
+
+        top = ctk.CTkFrame(card, fg_color="transparent")
+        top.pack(fill="x", padx=16, pady=(12, 4))
+
+        make_label(top, "5. Registro de actividad", size=14, weight="bold").pack(side="left")
+
+        ctk.CTkButton(
+            top, text="💾 Guardar log", width=110, height=28,
+            fg_color=COLORS["accent"], hover_color="#1565C0",
+            text_color="#FFFFFF", corner_radius=6, command=self._on_save_log,
+        ).pack(side="right")
+
+        self.log_text = ScrollableLog(card)
+        self.log_text.pack(fill="both", expand=True, padx=16, pady=(0, 12))
+
+    # ── Actions ────────────────────────────────────────────────────────────
+
+    def _on_add_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Seleccionar carpeta con recibos")
+        if not folder:
+            return
+        items = scan_path(folder)
+        if not items:
+            messagebox.showwarning("Sin archivos", "No se encontraron PDFs ni imágenes.")
+            return
+        for item in items:
+            self._add_item(item)
+
+    def _on_add_zip(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="Seleccionar archivos ZIP",
+            filetypes=[("Archivos ZIP", "*.zip"), ("Todos", "*.*")],
+        )
+        if not paths:
+            return
+        added = 0
+        for p in paths:
+            items = scan_path(p)
+            for item in items:
+                self._add_item(item)
+                added += 1
+        if added == 0:
+            messagebox.showwarning("Sin contenido", "Los ZIP no contienen PDFs ni imágenes.")
+
+    def _on_add_files(self) -> None:
+        paths = filedialog.askopenfilenames(
+            title="Seleccionar archivos",
+            filetypes=[
+                ("PDFs e imágenes", "*.pdf *.png *.jpg *.jpeg *.tif *.tiff *.bmp *.webp"),
+                ("Todos", "*.*"),
+            ],
+        )
+        if not paths:
+            return
+        for p in paths:
+            items = scan_path(p)
+            for item in items:
+                self._add_item(item)
+
+    def _on_clear_files(self) -> None:
+        self._items = []
+        self._refresh_files_list()
+
+    def _add_item(self, item: InputItem) -> None:
+        if not hasattr(self, "_items") or self._items is None:
+            self._items = []
+        if any(i.display_name == item.display_name for i in self._items):
+            return
+        self._items.append(item)
+        self._refresh_files_list()
+
+    def _refresh_files_list(self) -> None:
+        if not hasattr(self, "_items"):
+            self._items = []
+        self.files_listbox.configure(state="normal")
+        self.files_listbox.delete("1.0", "end")
+        for it in self._items:
+            self.files_listbox.insert("end", f"  • {it.display_name}  [{it.kind}]\n")
+        self.files_listbox.configure(state="disabled")
+        self.files_count_lbl.configure(text=f"{len(self._items)} archivo(s)")
+
+    def _on_choose_output(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Guardar Excel como...",
+            defaultextension=".xlsx",
+            initialfile=DEFAULT_OUTPUT,
+            filetypes=[("Excel", "*.xlsx")],
+        )
+        if path:
+            self.output_var.set(path)
+
+    def _toggle_theme(self) -> None:
+        current = ctk.get_appearance_mode()
+        new_mode = "light" if current.lower() == "dark" else "dark"
+        ctk.set_appearance_mode(new_mode)
+        self.settings["theme"] = new_mode
+        mappings_module.save_settings(self.settings)
+
+    def _on_process(self) -> None:
+        if self._processing:
+            return
+        if not hasattr(self, "_items") or not self._items:
+            messagebox.showwarning("Sin archivos", "Agregá al menos un archivo.")
+            return
+        out_path = self.output_var.get().strip()
+        if not out_path:
+            messagebox.showwarning("Sin salida", "Indicá la ruta del Excel de salida.")
+            return
+        if not out_path.lower().endswith(".xlsx"):
+            out_path += ".xlsx"
+            self.output_var.set(out_path)
+
+        ocr_lang = self.ocr_var.get()
+        try:
+            max_workers = int(self.workers_var.get())
+        except ValueError:
+            max_workers = max(1, (os.cpu_count() or 4) - 1)
+
+        self.settings["ocr_lang"] = ocr_lang
+        self.settings["max_workers"] = max_workers
+        mappings_module.save_settings(self.settings)
+
+        self._set_processing_state(True)
+        self._clear_log()
+        self._append_log(f"═══ Nueva ejecución {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ═══")
+
+        self._processor = Processor(
+            items=list(self._items),
+            ocr_lang=ocr_lang,
+            max_workers=max_workers,
+            progress_callback=self._on_progress,
+            log_callback=lambda m: self.after(0, lambda mm=m: self._append_log(mm)),
+            cancel_check=lambda: False,
+        )
+
+        self._processing_thread = threading.Thread(target=self._run_processor, daemon=True)
+        self._processing_thread.start()
+
+    def _run_processor(self) -> None:
+        try:
+            result = self._processor.run()
+            self._last_columns = result["columns"]
+            self._last_rows = result["rows"]
+            self._last_locale = result["locale"]
+            self._last_summary = result["summary"]
+
+            self.after(0, lambda: self._on_processing_finished(result))
+        except FileNotFoundError as e:
+            self.after(0, lambda: self._on_processing_error(str(e)))
+        except Exception as e:
+            self.after(0, lambda: self._on_processing_error(f"{e}"))
+        finally:
+            self._processing = False
+
+    def _on_progress(self, completed: int, total: int, result) -> None:
+        def update():
+            pct = completed / total if total else 0
+            self.progress.set(pct)
+            self.progress_text_lbl.configure(text=f"{completed}/{total} ({int(pct * 100)}%)")
+        self.after(0, update)
+
+    def _on_processing_finished(self, result: dict) -> None:
+        out_path = Path(self.output_var.get().strip())
+        try:
+            locale_dict = result["locale"].to_dict() if result["locale"] else None
+            saved = write_excel(
+                out_path,
+                result["columns"],
+                result["rows"],
+                locale_info=locale_dict,
+                summary=result["summary"],
+            )
+            self._last_output_path = saved
+            self._append_log(f"✓ Excel generado: {saved}")
+            self._append_log(f"✓ {len(result['rows'])} filas x {len(result['columns'])} columnas")
+            self.open_excel_btn.configure(state="normal")
+            self.preview_btn.configure(state="normal")
+            self.process_btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
+            self.progress.set(1.0)
+            self.progress_text_lbl.configure(
+                text=f"✓ {result['summary']['processed']} archivos procesados"
+            )
+            self.eta_lbl.configure(text="")
+            if result["locale"]:
+                self.locale_lbl.configure(
+                    text=f"Locale: {result['locale'].country} ({result['locale'].code}) • {result['locale'].currency}"
+                )
+            self._set_processing_state(False)
+            messagebox.showinfo(
+                "Completado",
+                f"Excel generado con éxito:\n{saved}\n\n"
+                f"Filas: {len(result['rows'])}\n"
+                f"Columnas: {len(result['columns'])}",
+            )
+        except Exception as e:
+            self._on_processing_error(f"Error guardando Excel: {e}")
+
+    def _on_processing_error(self, message: str) -> None:
+        self._append_log(f"✗ ERROR: {message}")
+        self._set_processing_state(False)
+        self.progress.set(0)
+        self.progress_text_lbl.configure(text="Error")
+        self.eta_lbl.configure(text="")
+        messagebox.showerror("Error", message)
+
+    def _on_cancel(self) -> None:
+        if self._processor:
+            self._processor.cancel()
+            self._append_log("⚠ Cancelación solicitada...")
+            self.cancel_btn.configure(state="disabled")
+
+    def _set_processing_state(self, busy: bool) -> None:
+        self._processing = busy
+        if busy:
+            self.process_btn.configure(state="disabled")
+            self.cancel_btn.configure(state="normal")
+            self.progress.set(0)
+            self.progress_text_lbl.configure(text="0/0 (0%)")
+            self.eta_lbl.configure(text="Iniciando...")
+            self.preview_btn.configure(state="disabled")
+            self.open_excel_btn.configure(state="disabled")
+        else:
+            self.process_btn.configure(state="normal")
+            self.cancel_btn.configure(state="disabled")
+
+    # ── Log / preview helpers ──────────────────────────────────────────────
+
+    def _clear_log(self) -> None:
+        self.log_text.configure(state="normal")
+        self.log_text.delete("1.0", "end")
+        self.log_text.configure(state="disabled")
+
+    def _append_log(self, text: str) -> None:
+        self.log_text.append(text)
+
+    def _on_save_log(self) -> None:
+        if not hasattr(self, "_items"):
+            return
+        path = filedialog.asksaveasfilename(
+            title="Guardar log",
+            defaultextension=".txt",
+            filetypes=[("Texto", "*.txt")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.log_text.get("1.0", "end"))
+            messagebox.showinfo("Log guardado", f"Log guardado en:\n{path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo guardar el log: {e}")
+
+    def _on_preview(self) -> None:
+        if not self._last_rows or not self._last_columns:
+            messagebox.showinfo("Sin datos", "Todavía no hay datos para previsualizar.")
+            return
+        PreviewWindow(self, self._last_columns, self._last_rows)
+
+    def _on_open_excel(self) -> None:
+        if not self._last_output_path or not self._last_output_path.exists():
+            messagebox.showwarning("Sin archivo", "El Excel aún no fue generado.")
+            return
+        try:
+            if platform.system() == "Windows":
+                os.startfile(str(self._last_output_path))
+            elif platform.system() == "Darwin":
+                subprocess.run(["open", str(self._last_output_path)], check=False)
+            else:
+                subprocess.run(["xdg-open", str(self._last_output_path)], check=False)
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo abrir el archivo: {e}")
+
+
+class PreviewWindow(ctk.CTkToplevel):
+    def __init__(self, parent, columns: List[str], rows: List[dict]):
+        super().__init__(parent)
+        self.title("Vista previa de datos")
+        self.geometry("1000x600")
+        self.configure(fg_color=COLORS["bg"])
+        self.transient(parent)
+
+        make_label(self, f"{len(rows)} archivo(s) x {len(columns)} columna(s)",
+                   size=14, weight="bold").pack(padx=16, pady=(14, 8), anchor="w")
+
+        scroll_frame = ctk.CTkScrollableFrame(self, fg_color=COLORS["card"])
+        scroll_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+
+        header_row = ctk.CTkFrame(scroll_frame, fg_color=COLORS["primary"])
+        header_row.pack(fill="x")
+        for i, col in enumerate(columns):
+            lbl = ctk.CTkLabel(
+                header_row, text=str(col),
+                width=140, anchor="w", padx=8, pady=8,
+                font=ctk.CTkFont(weight="bold", size=11),
+                text_color="#FFFFFF",
+            )
+            lbl.grid(row=0, column=i, sticky="w")
+
+        max_show = min(50, len(rows))
+        for r_idx, row in enumerate(rows[:max_show], start=1):
+            row_frame = ctk.CTkFrame(
+                scroll_frame,
+                fg_color="#F9F9F9" if r_idx % 2 == 0 else "#FFFFFF",
+            )
+            row_frame.pack(fill="x")
+            for c_idx, col in enumerate(columns):
+                val = str(row.get(col, ""))[:50]
+                lbl = ctk.CTkLabel(
+                    row_frame, text=val,
+                    width=140, anchor="w", padx=8, pady=6,
+                    font=ctk.CTkFont(size=11), text_color=COLORS["text"],
+                )
+                lbl.grid(row=0, column=c_idx, sticky="w")
+
+        if len(rows) > max_show:
+            make_label(
+                self, f"Mostrando primeras {max_show} filas de {len(rows)}.",
+                size=11, color=COLORS["text_muted"],
+            ).pack(pady=(0, 12))

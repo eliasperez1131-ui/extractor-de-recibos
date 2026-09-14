@@ -1,0 +1,1 @@
+"""Tesseract installer wizard."""

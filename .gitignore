@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# App
+*.log
+test_output.xlsx
+test_payment.py
+test_smoke.py
+debug_canon.py
+debug_merge.py
+make_icon.py
+tessdata_dl/
