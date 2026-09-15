@@ -14,6 +14,14 @@ Al ejecutar el `.exe` por primera vez, Windows puede mostrar una advertencia azu
 1. Click derecho en `ExtractorRecibos.exe` → **Propiedades** → tildá **"Desbloquear"** → Aceptar
 2. O cuando aparece la pantalla azul: **"Más información"** → **"Ejecutar de todas formas"**
 
+### 🟢 Alternativa sin instalador (.bat portable)
+
+Si preferís evitar completamente el aviso de SmartScreen, usá el script BAT que instala todo desde el código fuente:
+
+1. Descargá [`instalar_y_ejecutar.bat`](https://github.com/eliasperez1131-ui/extractor-de-recibos/releases/download/v1.0.5/instalar_y_ejecutar.bat) (botón derecho → "Guardar enlace como...")
+2. Doble clic → instala dependencias Python y abre la app
+3. **No genera ningún .exe**, así que NO aparece el aviso de virus
+
 Más detalles en [ANTIVIRUS_NOTICE.md](./ANTIVIRUS_NOTICE.md).
 
 ---
