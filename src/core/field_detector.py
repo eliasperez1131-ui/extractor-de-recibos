@@ -297,64 +297,115 @@ def _known_label_score(label: str) -> int:
 def detect_fields_in_text(text: str, locale: LocaleInfo) -> Dict[str, str]:
     """Extract field->value pairs from a single receipt text.
 
-    Strategy:
-      1. Label-value pairs from lines (LABEL: value).
-      2. Value-based detection when no label is present (CLABE, IBAN, email,
-         phone, URL, dates, amounts, bank names).
-      3. Context-aware classification for ambiguous amounts (total vs subtotal
-         vs amount received).
+    Strategy (revised):
+      1. Run label-based detection FIRST so explicit labels like
+         "Cuenta receptora:" win over regex-based detection of account numbers.
+      2. Build a set of digit-only values already labeled, so we don't
+         auto-create CLABE/CUENTA/TELEFONO that conflict with labeled data.
+      3. Then run value-based detection (CLABE, IBAN, email, URL, bank
+         names) only for fields that aren't already labeled and only for
+         values that aren't already present.
+      4. Add amount fallback only if no monetary labels exist.
     """
     fields: Dict[str, str] = {}
     if not text or not text.strip():
         return fields
 
-    date_match = DATE_PATTERN.search(text)
-    if date_match and "FECHA" not in fields:
-        fields["FECHA"] = date_match.group(0).strip()
-
-    amount_matches = AMOUNT_PATTERN.findall(text)
-    amounts = [a.strip() for a in amount_matches if a.strip()]
-
     text_lower_norm = _normalize(text)
 
-    clabe_match = CLABE_PATTERN.search(text)
-    if clabe_match:
-        fields["CLABE"] = clabe_match.group(0).strip()
-
-    iban_match = IBAN_PATTERN.search(text)
-    if iban_match:
-        iban_val = iban_match.group(0).strip()
-        if not iban_val.isdigit():
-            fields["IBAN"] = iban_val
-
-    email_match = EMAIL_PATTERN.search(text)
-    if email_match:
-        fields["EMAIL"] = email_match.group(0).strip()
-
-    url_match = URL_PATTERN.search(text)
-    if url_match:
-        fields["WEB"] = url_match.group(0).strip()
-
-    for m in ACCOUNT_PATTERN.finditer(text):
-        val = m.group(0).strip()
-        if CLABE_PATTERN.fullmatch(val):
+    # ── Phase 1: label-based detection ─────────────────────────────────
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or len(line) < 3:
             continue
-        if "CLABE" in fields and val == fields["CLABE"]:
+        m = LABEL_VALUE_PATTERN.match(line)
+        if not m:
             continue
-        fields["CUENTA"] = val
-        break
+        label = m.group("label").strip()
+        value = m.group("value").strip()
+        if not value or len(value) > 200:
+            continue
+        if len(label) > 60:
+            continue
+        norm = _normalize(label)
+        if not norm or norm in {"http", "https", "www", "tel", "email"}:
+            continue
+        fields[label] = value
 
-    for m in re.finditer(r"(?<![\d-])(\+?\d{1,3}[\s\-]?)?\(?\d{2,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}(?![\d-])", text):
-        candidate = m.group(0).strip()
-        digits = re.sub(r"\D", "", candidate)
-        if 8 <= len(digits) <= 11:
-            if "CUENTA" in fields and re.sub(r"\D", "", candidate) == re.sub(r"\D", "", fields["CUENTA"]):
+    # ── Phase 2: collect already-labeled digit values to avoid duplicates
+    labeled_digits: set = set()
+    for v in fields.values():
+        d = re.sub(r"\D", "", v)
+        if d:
+            labeled_digits.add(d)
+
+    # ── Phase 3: value-based detection ────────────────────────────────
+    # CLABE (18-digit) - only if no labeled field already has this value
+    has_clabe_label = any("clabe" in _normalize(k) for k in fields)
+    if not has_clabe_label:
+        for clabe_match in CLABE_PATTERN.finditer(text):
+            candidate = clabe_match.group(0).strip()
+            if candidate in labeled_digits:
                 continue
-            if "CLABE" in fields and candidate == fields["CLABE"]:
-                continue
-            fields["TELEFONO"] = candidate
+            fields["CLABE"] = candidate
+            labeled_digits.add(candidate)
             break
 
+    # IBAN
+    if "IBAN" not in fields:
+        iban_match = IBAN_PATTERN.search(text)
+        if iban_match:
+            iban_val = iban_match.group(0).strip()
+            if not iban_val.isdigit():
+                fields["IBAN"] = iban_val
+
+    # Email
+    if "EMAIL" not in fields:
+        email_match = EMAIL_PATTERN.search(text)
+        if email_match:
+            fields["EMAIL"] = email_match.group(0).strip()
+
+    # URL
+    if "WEB" not in fields:
+        url_match = URL_PATTERN.search(text)
+        if url_match:
+            fields["WEB"] = url_match.group(0).strip()
+
+    # CUENTA (account number 10-20 digits) - skip if a "cuenta/cta" label
+    # already exists OR if the number is already labeled elsewhere
+    has_cuenta_label = any(
+        _normalize(k).startswith("cuenta") or "cta" in _normalize(k).split()
+        for k in fields
+    )
+    if not has_cuenta_label:
+        for m in ACCOUNT_PATTERN.finditer(text):
+            val = m.group(0).strip()
+            if CLABE_PATTERN.fullmatch(val):
+                continue
+            digits = re.sub(r"\D", "", val)
+            if digits in labeled_digits:
+                continue
+            fields["CUENTA"] = val
+            labeled_digits.add(digits)
+            break
+
+    # TELEFONO - skip if the number is already labeled (avoid clabe-like matches)
+    if "TELEFONO" not in fields:
+        for m in re.finditer(
+            r"(?<![\d-])(\+?\d{1,3}[\s\-]?)?\(?\d{2,4}\)?[\s\-]?\d{3,4}[\s\-]?\d{3,4}(?![\d-])",
+            text,
+        ):
+            candidate = m.group(0).strip()
+            digits = re.sub(r"\D", "", candidate)
+            if not (8 <= len(digits) <= 11):
+                continue
+            if digits in labeled_digits:
+                continue
+            fields["TELEFONO"] = candidate
+            labeled_digits.add(digits)
+            break
+
+    # Banco (real bank names)
     bank_hits = []
     for bank in MX_BANKS | AR_BANKS | BR_BANKS:
         norm_bank = _normalize(bank)
@@ -364,25 +415,15 @@ def detect_fields_in_text(text: str, locale: LocaleInfo) -> Dict[str, str]:
         bank_hits.sort(reverse=True)
         fields["BANCO"] = bank_hits[0][1].upper()
 
-    for line in text.split("\n"):
-        line = line.strip()
-        if not line or len(line) < 3:
-            continue
-        m = LABEL_VALUE_PATTERN.match(line)
-        if m:
-            label = m.group("label").strip()
-            value = m.group("value").strip()
-            if not value or len(value) > 200:
-                continue
-            if len(label) > 60:
-                continue
-            norm = _normalize(label)
-            if not norm or norm in {"http", "https", "www", "tel", "email"}:
-                continue
-            canonical = _canonical_key(label)
-            if canonical in VALUE_FIELDS:
-                continue
-            fields[label] = value
+    # FECHA (regex-based) - only if not labeled
+    if not any("fecha" in _normalize(k) for k in fields):
+        date_match = DATE_PATTERN.search(text)
+        if date_match:
+            fields["FECHA"] = date_match.group(0).strip()
+
+    # Amounts (for MONTO_DETECTADO fallback only)
+    amount_matches = AMOUNT_PATTERN.findall(text)
+    amounts = [a.strip() for a in amount_matches if a.strip()]
 
     label_lower_text = " ".join(fields.keys()).lower()
     has_total_label = any(

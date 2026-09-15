@@ -9,21 +9,21 @@
 !define SRC_ROOT "C:\Users\elias\OneDrive\Desktop\PROYECTO DE EXTRACTOR DE PDF"
 
 Name "Extractor de Recibos a Excel"
-OutFile "${PAYLOAD}\ExtractorRecibos_Setup_v1.0.4.exe"
+OutFile "${PAYLOAD}\ExtractorRecibos_Setup_v1.0.5.exe"
 InstallDir "$PROGRAMFILES\Extractor de Recibos"
 InstallDirRegKey HKLM "Software\Extractor de Recibos" "InstallDir"
 RequestExecutionLevel admin
 ShowInstDetails show
 ShowUninstDetails show
-BrandingText "Extractor de Recibos a Excel v1.0.4"
+BrandingText "Extractor de Recibos a Excel v1.0.5"
 
 ; ── Version info ───────────────────────────────────────────────────────────
-VIProductVersion "1.0.4.0"
+VIProductVersion "1.0.5.0"
 VIAddVersionKey "ProductName" "Extractor de Recibos a Excel"
-VIAddVersionKey "ProductVersion" "1.0.4.0"
+VIAddVersionKey "ProductVersion" "1.0.5.0"
 VIAddVersionKey "FileDescription" "Instalador de Extractor de Recibos a Excel"
 VIAddVersionKey "LegalCopyright" "2026"
-VIAddVersionKey "FileVersion" "1.0.4.0"
+VIAddVersionKey "FileVersion" "1.0.5.0"
 VIAddVersionKey "CompanyName" "Extractor de Recibos"
 
 ; ── Interface ──────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ Section "Instalar Extractor de Recibos" SecMain
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Extractor de Recibos" "InstallLocation" "$\"$INSTDIR$\""
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Extractor de Recibos" "DisplayIcon" "$\"$INSTDIR\ExtractorRecibos.exe$\""
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Extractor de Recibos" "Publisher" "Extractor de Recibos"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Extractor de Recibos" "DisplayVersion" "1.0.4.0"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Extractor de Recibos" "DisplayVersion" "1.0.5.0"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Extractor de Recibos" "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Extractor de Recibos" "NoRepair" 1
 

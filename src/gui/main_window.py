@@ -27,8 +27,8 @@ from .widgets import (
 
 
 APP_TITLE = "Extractor de Recibos a Excel"
-APP_NAME = "Extractor de Recibos a Excel v1.0.4"
-APP_VERSION = "v1.0.4"
+APP_NAME = "Extractor de Recibos a Excel v1.0.5"
+APP_VERSION = "v1.0.5"
 DEFAULT_OUTPUT = "recibos_extraidos.xlsx"
 
 
