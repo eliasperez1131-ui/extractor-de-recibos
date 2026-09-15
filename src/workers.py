@@ -5,8 +5,9 @@ import queue
 import shutil
 import tempfile
 import threading
+import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -38,26 +39,34 @@ def _resolve_zip_member(item: InputItem, temp_dir: Path) -> Path:
 
 
 def _process_one(item: InputItem, ocr_lang: str, temp_dir_str: str) -> FileResult:
-    """Top-level function for ProcessPoolExecutor (must be picklable)."""
+    """Process a single file: extract text via PDF-texto, PDF-OCR or Imagen-OCR."""
     temp_dir = Path(temp_dir_str)
     try:
-        ocr_module.configure_tesseract()
+        try:
+            ocr_module.configure_tesseract()
+        except Exception:
+            pass
+
         resolved = _resolve_zip_member(item, temp_dir)
         text = ""
-        method = ""
+        method = "Omitido"
         error = None
 
         if item.kind == "PDF":
-            text = extract_text_from_pdf(resolved)
-            if text:
-                method = "PDF-texto"
-            else:
-                try:
-                    text = ocr_pdf_pages(resolved, lang=ocr_lang)
-                    method = "PDF-OCR"
-                except Exception as e:
-                    method = "PDF-error"
-                    error = str(e)
+            try:
+                text = extract_text_from_pdf(resolved)
+                if text and len(text.strip()) >= 20:
+                    method = "PDF-texto"
+                else:
+                    try:
+                        text = ocr_pdf_pages(resolved, lang=ocr_lang)
+                        method = "PDF-OCR"
+                    except Exception as e:
+                        method = "PDF-error"
+                        error = f"OCR fallo: {e}"
+            except Exception as e:
+                method = "PDF-error"
+                error = str(e)
         elif item.kind == "Imagen":
             try:
                 text = ocr_image(resolved, lang=ocr_lang)
@@ -83,7 +92,7 @@ def _process_one(item: InputItem, ocr_lang: str, temp_dir_str: str) -> FileResul
             text="",
             fields={},
             method="Error",
-            error=f"{e}\n{traceback.format_exc()}",
+            error=f"{e}\n{traceback.format_exc()[:500]}",
         )
 
 
@@ -128,8 +137,16 @@ class Processor:
 
         try:
             configure_tesseract()
+            if self.log_callback:
+                self.log_callback("Tesseract OK")
         except FileNotFoundError as e:
-            raise FileNotFoundError(str(e))
+            if self.log_callback:
+                self.log_callback(f"⚠ Tesseract no disponible: {e}")
+            if self.log_callback:
+                self.log_callback("Solo se procesaran PDFs con texto (sin OCR)")
+        except Exception as e:
+            if self.log_callback:
+                self.log_callback(f"⚠ Error configurando Tesseract: {e}")
 
         if self.log_callback:
             self.log_callback(f"Iniciando procesamiento con {self.max_workers} workers...")
@@ -137,20 +154,34 @@ class Processor:
             self.log_callback(f"Total de archivos: {total}")
 
         with TempDirectory(prefix="extractor_run_") as temp_dir:
-            executor = ProcessPoolExecutor(max_workers=self.max_workers)
+            executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix="extract")
             try:
-                future_to_item = {
-                    executor.submit(_process_one, item, self.ocr_lang, str(temp_dir)): item
-                    for item in self.items
-                }
+                future_to_item = {}
+                for item in self.items:
+                    if self.log_callback:
+                        self.log_callback(f"→ Enviando a procesar: {item.display_name}")
+                    fut = executor.submit(_process_one, item, self.ocr_lang, str(temp_dir))
+                    future_to_item[fut] = item
 
+                if self.log_callback:
+                    self.log_callback(f"Todos los archivos enviados al pool. Esperando resultados...")
+
+                last_log_time = time.time()
                 for future in as_completed(future_to_item):
                     if self._cancelled or (self.cancel_check and self.cancel_check()):
                         if self.log_callback:
-                            self.log_callback("Cancelación solicitada. Deteniendo...")
+                            self.log_callback("Cancelacion solicitada. Deteniendo...")
                         break
 
-                    result = future.result()
+                    try:
+                        result = future.result(timeout=300)
+                    except Exception as e:
+                        item = future_to_item[future]
+                        result = FileResult(
+                            item=item, text="", fields={},
+                            method="Error", error=f"Worker fallo: {e}",
+                        )
+
                     results.append(result)
                     completed_count += 1
                     summary["processed"] += 1
@@ -166,17 +197,25 @@ class Processor:
                         summary["errors"] += 1
 
                     if self.log_callback:
-                        status = "✓" if not result.error else "✗"
+                        status = "OK" if not result.error else "ERROR"
                         self.log_callback(
-                            f"{status} [{completed_count}/{total}] {result.item.display_name} → {result.method}"
+                            f"[{completed_count}/{total}] {result.item.display_name} -> {result.method} [{status}]"
                             + (f" ({result.error[:80]})" if result.error else "")
                         )
 
                     if self.progress_callback:
                         self.progress_callback(completed_count, total, result)
 
+                    if self.log_callback and time.time() - last_log_time > 5:
+                        self.log_callback(f"Progreso: {completed_count}/{total} archivos completados")
+                        last_log_time = time.time()
+
             finally:
-                executor.shutdown(wait=True, cancel_futures=True)
+                executor.shutdown(wait=False)
+
+        if completed_count < total and not self._cancelled:
+            if self.log_callback:
+                self.log_callback(f"⚠ Procesamiento incompleto: {completed_count}/{total}")
 
         all_texts = [r.text for r in results if r.text]
         locale = detect_locale(all_texts)
@@ -187,6 +226,9 @@ class Processor:
                 all_fields.append({})
             else:
                 all_fields.append(r.fields)
+
+        if self.log_callback:
+            self.log_callback("Generando columnas y filas...")
 
         columns, rows = build_master_columns(all_fields, locale)
 

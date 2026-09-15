@@ -27,8 +27,8 @@ from .widgets import (
 
 
 APP_TITLE = "Extractor de Recibos a Excel"
-APP_NAME = "Extractor de Recibos a Excel v1.0.3"
-APP_VERSION = "v1.0.3"
+APP_NAME = "Extractor de Recibos a Excel v1.0.4"
+APP_VERSION = "v1.0.4"
 DEFAULT_OUTPUT = "recibos_extraidos.xlsx"
 
 
@@ -471,6 +471,7 @@ class MainWindow(ctk.CTk):
         self._set_processing_state(True)
         self._clear_log()
         self._append_log(f"═══ Nueva ejecución {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ═══")
+        self._append_log(f"Enviando {len(self._items)} archivo(s) a procesar...")
 
         self._processor = Processor(
             items=list(self._items),
@@ -481,8 +482,10 @@ class MainWindow(ctk.CTk):
             cancel_check=lambda: False,
         )
 
+        self._processing_start = time.time()
         self._processing_thread = threading.Thread(target=self._run_processor, daemon=True)
         self._processing_thread.start()
+        self._start_progress_watchdog()
 
     def _run_processor(self) -> None:
         try:
@@ -505,7 +508,28 @@ class MainWindow(ctk.CTk):
             pct = completed / total if total else 0
             self.progress.set(pct)
             self.progress_text_lbl.configure(text=f"{completed}/{total} ({int(pct * 100)}%)")
+            if total > 0:
+                elapsed = time.time() - getattr(self, "_processing_start", time.time())
+                rate = completed / elapsed if elapsed > 0 else 0
+                if rate > 0 and completed < total:
+                    eta = (total - completed) / rate
+                    self.eta_lbl.configure(text=f"Procesando {completed} de {total} - ETA: {int(eta)}s")
+                else:
+                    self.eta_lbl.configure(text=f"Procesando {completed} de {total}...")
         self.after(0, update)
+
+    def _start_progress_watchdog(self) -> None:
+        """Update the eta label every 2s while processing (so user sees activity)."""
+        if not getattr(self, "_processing", False):
+            return
+        try:
+            elapsed = time.time() - getattr(self, "_processing_start", time.time())
+            current_text = self.eta_lbl.cget("text") or ""
+            if not current_text.startswith("Procesando") or "Procesando 0 de" in current_text:
+                self.eta_lbl.configure(text=f"Procesando... ({int(elapsed)}s)")
+        except Exception:
+            pass
+        self.after(2000, self._start_progress_watchdog)
 
     def _on_processing_finished(self, result: dict) -> None:
         out_path = Path(self.output_var.get().strip())
@@ -568,9 +592,11 @@ class MainWindow(ctk.CTk):
             self.eta_lbl.configure(text="Iniciando...")
             set_button_active(self.preview_btn, None)
             set_button_active(self.open_excel_btn, None)
+            self.update_idletasks()
         else:
             set_button_active(self.process_btn, self._on_process)
             set_button_active(self.cancel_btn, None)
+            self.eta_lbl.configure(text="")
 
     # ── Log / preview helpers ──────────────────────────────────────────────
 
